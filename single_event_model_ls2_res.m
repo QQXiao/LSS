@@ -1,4 +1,4 @@
-function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw, fsldir)
+function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
     % Usage: single_event_model_ls2(featdir,write_std_image,use_raw)
     % Takes a feat directory, and runs a ls and ls with 1 at a time
     % estimation on the filtered_func_data.img file within.
@@ -15,9 +15,9 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
     %
     % Jeanette Mumford 12/16/2010:  
     %      Adapted from single_event_model.m from the ridge regression code
-    %modified by Xiaoqian Xiao 12/23/2015
-    %	   modified script for single representation to repeated representation.
-    
+   
+    % Modified by Xiaoqian Xiao 12/26/2015
+    %	Adapted for normalization each voxels accoding to its nosize level. 
     
 
     if ~exist('write_std_image')
@@ -37,13 +37,18 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
     design = read_fsl_design2(featdir);
     
     %load onsets
+
     onscond=[];
     ons=[];
+    %condnames={};
     goodconds=[];
     
     for evnum=1:design.evs_orig-1 % ignore the last regressor
+      %condnames(evnum)={eval(sprintf('design.evtitle%d',evnum))};
       onsetf_loop=eval(sprintf('design.custom%d', evnum));
       ons_loop=load(onsetf_loop);
+      %onsetf_loop=sprintf('%s/custom_timing_files/ev%d.txt',featdir, evnum);
+      %ons_loop=load(eval(onsetf_loop));
       % added by RP, 11/8/09
       % skips over single-column onset files (e.g., motion parameters)
       if size(ons_loop,2)==3,
@@ -107,10 +112,12 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
 
     
     for t = 1:length(onsets)
+    
         ssf = zeros(1,ntp);
-        ssf(onsets(t))=1;%onset TR for current trial
-        trial(t,:) = conv(ssf,hrf); %hrf convolution
-        X_single(:,t) = trial(t,1:ntp)'; %only include data during scan
+        ssf(onsets(t))=1;
+        trial(t,:) = conv(ssf,hrf); 
+        X_single(:,t) = trial(t,1:ntp)';
+    
     end
   
     X_single=[X_single, nuisance];
@@ -139,20 +146,17 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
 
    F=eye(ntp)-H;
    
-   X_single_hp=F*X_single; %data after high pass filtered
+   X_single_hp=F*X_single;
    
-   %nparam=size(X_single, 2); % num of trial + 2 for nuisance
-   num_item=unique(label_list);
-   ntrial=length(num_item);
-   nparam=ntrial+2;
-   nrep=2;
-   nt=size(X_single, 1); %num of TRs
+   
+   nparam=size(X_single, 2);
+   nt=size(X_single, 1);
    beta_maker=zeros(nparam, nt);
    
    %This yields the final design for least squares.
    ncolX=size(X_single_hp, 2);
    for i=1:ncolX
-       X_single_hp(:,i)=X_single_hp(:,i)-mean(X_single_hp(:,i)); %de-mean for each trial
+       X_single_hp(:,i)=X_single_hp(:,i)-mean(X_single_hp(:,i));
    end
    
    %create the design matrix for the 1 at a time model (LS-S)
@@ -162,19 +166,14 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
    %types.  It might be okay with 2 trial types.  There is some
    %commented out code below that could be edited for this
    %purpose.  
-   for t=1:nparam
-	if t<=ntrial
-       i=find(label_list==num_item(t));
-	else
-	i=nrep*ntrial+(t-ntrial)
-	end
-       des_loop=[sum(X_single_hp(:,i),2), sum(X_single_hp, 2)-sum(X_single_hp(:,i),2), nuisance];
+   for i=1:nparam
+       des_loop=[X_single_hp(:,i), sum(X_single_hp, 2)-X_single_hp(:,i), nuisance];
        %hp filter
        %des_loop=F*des_loop;
        %mean center
        des_loop=des_loop-kron(ones(length(des_loop),1),mean(des_loop));
        beta_maker_loop=pinv(des_loop);
-       beta_maker(t,:)=beta_maker_loop(1,:);    
+       beta_maker(i,:)=beta_maker_loop(1,:);    
    end
    
    
@@ -187,17 +186,36 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
    %    X_omit=X_single(:, keep_loop==1); 
    %    des_loop=[X_single(:,i), sum(X_omit(:,conlist_loop==1),2), sum(X_omit(:,conlist_loop==2),2), sum(X_omit(:,conlist_loop==3),2), sum(X_omit(:,conlist_loop==4),2), nuisance];
    %    
-   %     des_loop=F*des_loop;
-   %     des_loop=des_loop-kron(ones(length(des_loop),1),mean(des_loop));
-   %  
-   %     beta_maker_loop=pinv(des_loop);
-   %     beta_maker(i,:)=beta_maker_loop(1,:);
+   %    des_loop=F*des_loop;
+   %    des_loop=des_loop-kron(ones(length(des_loop),1),mean(des_loop));
+   % 
+   %    beta_maker_loop=pinv(des_loop);
+   %    beta_maker(i,:)=beta_maker_loop(1,:);
    %end
    
    
-  %2015-10-16 still do not get the differences between est and lm 
-   beta_est2D=beta_maker*data2D; %one for each time
-   beta_lm2D=pinv(X_single_hp)*data2D;%all at a time
+   
+   beta_est2D=beta_maker*data2D;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+   %add by XXQ
+	res_est=data2D-pinv(beta_maker)*beta_est2D;
+	res_data=zeros(size(data));
+	for t=1:nt
+	data_loop=res_data(:,:,:,1)*0;
+	data_loop(mask==1)=res_est(i,:);
+	res_data(:,:,:,i)=data_loop;
+	end
+      fname_res = sprintf('%s/res_ls_one_at_time.nii',save_pth);
+      res_est_nii = datafile;     %uses 'datafile' as a templat                         
+      res_est_nii.img = res_data(:,:,:,:);  %setting the image data         
+      res_est_nii.hdr.dime.dim(5)=nt;   %Replace 204 with number of onsets=nruns  
+      res_est_nii.hdr.dime.datatype=16;   % how the computer stores the data            
+      res_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data             
+      save_untouch_nii(res_est_nii, fname_res_est);  %finally saving the data          
+      system(sprintf('gzip -f %s',fname_res_est));
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+   beta_lm2D=pinv(X_single_hp)*data2D;
    %put it into a 4D data set
    
    beta_est=data(:,:, :, 1:nparam)*0;
@@ -213,6 +231,11 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
        beta_est(:,:,:,i)=data_loop;
        beta_est_lm(:,:,:,i)=data_loop_lm;
    end
+   
+   
+   
+   
+    
     
     %Save data
     fprintf('\nSaving data...\n');
@@ -225,29 +248,29 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
                     getenv('FSLDIR'))
     
     for condition=goodconds,
-      %condition_ons=find(onscond==condition);
-      condition_ons=ntrial; 
+      condition_ons=find(onscond==condition);
       fprintf('writing RR image for condition %d...\n', condition);
-      fname_beta_est = sprintf('%s/rep%dls_one_at_time%s.nii',save_pth,condition,raw_flag);
+      fname_beta_est = sprintf('%s/pe%dls_one_at_time%s.nii',save_pth,condition,raw_flag);
       beta_est_nii = datafile;     %uses 'datafile' as a templat
-      beta_est_nii.img = beta_est(:,:,:,[1:ntrial]);  %setting the image data 
-      beta_est_nii.hdr.dime.dim(5)=ntrial;   %Replace 204 with number of onsets=nruns  
+      beta_est_nii.img = beta_est(:,:,:,condition_ons);  %setting the image data 
+      beta_est_nii.hdr.dime.dim(5)=length(condition_ons);   %Replace 204 with number of onsets=nruns  
       beta_est_nii.hdr.dime.datatype=16;   % how the computer stores the data
       beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
       save_untouch_nii(beta_est_nii, fname_beta_est);  %finally saving the data
       system(sprintf('gzip -f %s',fname_beta_est));
+     
       
-      %condition_ons=find(onscond==condition);
-      condition_ons=ntrial;
+      condition_ons=find(onscond==condition);
       fprintf('writing RR image for condition %d...\n',condition);
-      fname_beta_ls_est = sprintf('%s/rep%dls_all%s.nii',save_pth,condition,raw_flag);
+      fname_beta_ls_est = sprintf('%s/pe%dls_all%s.nii',save_pth,condition,raw_flag);
       beta_est_nii = datafile;     %uses 'datafile' as a templat
-      beta_est_nii.img = beta_est_lm(:,:,:,[1:ntrial]);  %setting the image data 
-      beta_est_nii.hdr.dime.dim(5)=ntrial;   %Replace 204 with number of onsets=nruns  
+      beta_est_nii.img = beta_est_lm(:,:,:,condition_ons);  %setting the image data 
+      beta_est_nii.hdr.dime.dim(5)=length(condition_ons);   %Replace 204 with number of onsets=nruns  
       beta_est_nii.hdr.dime.datatype=16;   % how the computer stores the data
       beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
       save_untouch_nii(beta_est_nii, fname_beta_ls_est);  %finally saving the data
       system(sprintf('gzip -f %s',fname_beta_ls_est));
+     
       
       
       %flips the image so it is correct in fslview
@@ -271,6 +294,7 @@ function out = single_event_model_ls2(featdir,label_list,write_std_image,use_raw
         
       %end
       
+  
     end
     
   
