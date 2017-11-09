@@ -193,17 +193,25 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
    %    beta_maker(i,:)=beta_maker_loop(1,:);
    %end
    
-   
-   
    beta_est2D=beta_maker*data2D;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-   %add by XXQ
+   %added by XXQ
 	res_est=data2D-pinv(beta_maker)*beta_est2D;
+	%cov_res=(1/nt)*(res_est'*res_est); %n(voxel) * n(voxel) variance-covariance matrix
+	for v=1:size(res_est,2)
+	res_std(v)=mean(res_est(:,v).*res_est(:,v))^0.5;
+	end
+	%[t,r]=eig(cov_res);
+	%p=size(cov_res,1);
+	%b=zeros(p); 
+	%for i=1:p
+    	%b=b+r(i,i)^-.5*t(:,i)*t(:,i)'; % variance-covariance matix * (-0.5)
+	%end	
 	res_data=zeros(size(data));
 	for t=1:nt
 	data_loop=res_data(:,:,:,1)*0;
-	data_loop(mask==1)=res_est(i,:);
-	res_data(:,:,:,i)=data_loop;
+	data_loop(mask==1)=res_est(t,:);
+	res_data(:,:,:,t)=data_loop;
 	end
       fname_res = sprintf('%s/res_ls_one_at_time.nii',save_pth);
       res_est_nii = datafile;     %uses 'datafile' as a templat                         
@@ -211,8 +219,8 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
       res_est_nii.hdr.dime.dim(5)=nt;   %Replace 204 with number of onsets=nruns  
       res_est_nii.hdr.dime.datatype=16;   % how the computer stores the data            
       res_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data             
-      save_untouch_nii(res_est_nii, fname_res_est);  %finally saving the data          
-      system(sprintf('gzip -f %s',fname_res_est));
+      save_untouch_nii(res_est_nii, fname_res);  %finally saving the data          
+      system(sprintf('gzip -f %s',fname_res));
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
    beta_lm2D=pinv(X_single_hp)*data2D;
@@ -224,19 +232,23 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
    for i=1:nparam
        data_loop=beta_est(:, :, :, 1)*0;
        data_loop(mask==1)=beta_est2D(i,:);
-       
+       %% added by XXQ
+       data_loop_t=beta_est(:, :, :, 1)*0;                                                                                          
+       %data_loop_pre_w=beta_est(:, :, :, 1)*0;                                                                                          
+       data_loop_t(mask==1)=beta_est2D(i,:)./res_std;
+       %data_loop_pre_w(mask==1)=beta_est2D(i,:)*b;
+       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
        data_loop_lm=beta_est(:, :, :, 1)*0;
        data_loop_lm(mask==1)=beta_lm2D(i, :);
        
        beta_est(:,:,:,i)=data_loop;
        beta_est_lm(:,:,:,i)=data_loop_lm;
+       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+       beta_est_t(:,:,:,i)=data_loop_t;
+       %beta_est_pre_w(:,:,:,i)=data_loop_pre_w;
+       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
    end
    
-   
-   
-   
-    
-    
     %Save data
     fprintf('\nSaving data...\n');
 
@@ -258,7 +270,26 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
       beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
       save_untouch_nii(beta_est_nii, fname_beta_est);  %finally saving the data
       system(sprintf('gzip -f %s',fname_beta_est));
-     
+
+      condition_ons=find(onscond==condition);
+      fname_beta_est_t = sprintf('%s/t_pe%dls_one_at_time%s.nii',save_pth,condition,raw_flag);
+      beta_est_nii = datafile;     %uses 'datafile' as a templat
+      beta_est_nii.img = beta_est_t(:,:,:,condition_ons);  %setting the image data 
+      beta_est_nii.hdr.dime.dim(5)=length(condition_ons);   %Replace 204 with number of onsets=nruns  
+      beta_est_nii.hdr.dime.datatype=16;   % how the computer stores the data
+      beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
+      save_untouch_nii(beta_est_nii, fname_beta_est_t);  %finally saving the data
+      system(sprintf('gzip -f %s',fname_beta_est_t));
+
+      %condition_ons=find(onscond==condition);
+      %fname_beta_est_pre_w = sprintf('%s/pre_w_pe%dls_one_at_time%s.nii',save_pth,condition,raw_flag);
+      %beta_est_nii = datafile;     %uses 'datafile' as a templat
+      %beta_est_nii.img = beta_est_pre_w(:,:,:,condition_ons);  %setting the image data 
+      %beta_est_nii.hdr.dime.dim(5)=length(condition_ons);   %Replace 204 with number of onsets=nruns  
+      %beta_est_nii.hdr.dime.datatype=16;   % how the computer stores the data
+      %beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
+      %save_untouch_nii(beta_est_nii, fname_beta_est_pre_w);  %finally saving the data
+      %system(sprintf('gzip -f %s',fname_beta_est_pre_w));
       
       condition_ons=find(onscond==condition);
       fprintf('writing RR image for condition %d...\n',condition);
@@ -270,8 +301,6 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
       beta_est_nii.hdr.dime.bitpix=32;     %how the computer stores the data
       save_untouch_nii(beta_est_nii, fname_beta_ls_est);  %finally saving the data
       system(sprintf('gzip -f %s',fname_beta_ls_est));
-     
-      
       
       %flips the image so it is correct in fslview
       %system('echo FSLOUTPUTTYPE=NIFTI_GZ')

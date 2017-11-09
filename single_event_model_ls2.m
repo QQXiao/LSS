@@ -43,10 +43,10 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
     
     for evnum=1:design.evs_orig-1 % ignore the last regressor
       %condnames(evnum)={eval(sprintf('design.evtitle%d',evnum))};
-      onsetf_loop=eval(sprintf('design.custom%d', evnum));
+      %onsetf_loop=eval(sprintf('design.custom%d', evnum));
+      %ons_loop=load(onsetf_loop);
+      onsetf_loop=sprintf('%s/custom_timing_files/ev%d.txt',featdir, evnum);
       ons_loop=load(onsetf_loop);
-      %onsetf_loop=sprintf('%s/custom_timing_files/ev%d.txt',featdir, evnum);
-      %ons_loop=load(eval(onsetf_loop));
       % added by RP, 11/8/09
       % skips over single-column onset files (e.g., motion parameters)
       if size(ons_loop,2)==3,
@@ -64,8 +64,9 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
     
     %load in nuisance regressors.  NOTE THIS IS TAILORED FOR THIS ANALYSIS
     nuisance=read_design_mat([featdir, '/design.mat']);
-    nuisance=nuisance(:, [end-1:end]);
-   
+    %nuisance=nuisance(:, [end-1:end]);
+       
+
     %load mask
     maskf = strcat(featdir, '/mask.nii.gz');
     maskfile = load_nii_zip(maskf);
@@ -117,7 +118,7 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
         X_single(:,t) = trial(t,1:ntp)';
     
     end
-  
+    nuisance=[];
     X_single=[X_single, nuisance];
     
    % We need to HP filter the design.  This is an approximation to what 
@@ -126,10 +127,10 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
    % done to the data.  The reason I'm not starting with the original
    % is because I would like to retain the smoothing and scaling that was 
    % done to filtered_func_data
-   %hpfile=sprintf('%s/absbrainthresh.txt',featdir);
-   %hp=load(hpfile);
-   %cut=hp/design.tr;
-   cut=design.paradigm_hp/design.tr;
+   hpfile=sprintf('%s/absbrainthresh.txt',featdir);
+   hp=load(hpfile);
+   cut=hp/design.tr;
+   %cut=design.paradigm_hp/design.tr;
    sigN2=(cut/(sqrt(2)))^2;
    K=toeplitz(1/sqrt(2*pi*sigN2)*exp(-[0:(ntp-1)].^2/(2*sigN2)));
    K=spdiags(1./sum(K')', 0, ntp,ntp)*K;
@@ -173,7 +174,7 @@ function out = single_event_model_ls2(featdir,write_std_image,use_raw, fsldir)
        beta_maker_loop=pinv(des_loop);
        beta_maker(i,:)=beta_maker_loop(1,:);    
    end
-   
+   beta_maker 
    
    %This is code you can edit if you want to break up the "other
    %trial" regressor into two or more (here I had 4)
